@@ -2,8 +2,9 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"fmt"
+	"gateway/cmd/config"
+	"gateway/cmd/utils"
 	"io"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	dapr "github.com/dapr/go-sdk/client"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
+	"google.golang.org/grpc/metadata" // 必须引入这个包
 )
 
 var (
@@ -28,49 +30,19 @@ func main() {
 	}
 	daprClient = client
 	defer daprClient.Close()
-
+	// 初始化配置
+	config.InitConfig()
 	r := gin.Default()
 
 	// 2. 跨域处理
 	r.Use(CORSMiddleware())
 
-	// 2. 定义抢票接口
-	r.POST("/api/buy", func(c *gin.Context) {
-		// 这里对应的就是你 Java 里的那个 TicketActorImpl
-		actorType := "TicketActor"
-		actorId := "Concert-JayChou-2026"
-		method := "deductTicket"
-		// 简单传个 "1"，Java 接收端直接用 Integer.parseInt() 转一下就行
-		data := []byte("1")
-
-		ctx := context.Background()
-
-		req := &dapr.InvokeActorRequest{
-			ActorType: actorType,
-			ActorID:   actorId,
-			Method:    method,
-			Data:      data,
-		}
-
-		// 3. 调用 Java 端 Actor
-		resp, err := daprClient.InvokeActor(ctx, req)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "调用Actor失败: " + err.Error()})
-			return
-		}
-
-		// 4. 将 Java Actor 返回的结果（true/false）返给前端
-		c.JSON(http.StatusOK, gin.H{
-			"message": "抢票结果已返回",
-			"data":    string(resp.Data),
-		})
-	})
-
 	// 3. 通用网关逻辑：支持任意 /:appID/*method
 	// 例如：POST /ticket-service/api/buy -> 调用 AppID 为 ticket-service 的 api/buy 方法
-	r.Any("/:appID/*method", AuthMiddleware(), RateLimitMiddleware(), func(c *gin.Context) {
+	r.Any("/:appID/*method", RateLimitMiddleware(), AuthMiddleware(), func(c *gin.Context) {
 		appID := c.Param("appID")
-		method := strings.TrimPrefix(c.Param("method"), "/")
+		method := c.Param("method")
+		method = strings.TrimPrefix(method, "/")
 
 		// 检查是否是 SSE (流式) 请求
 		if c.GetHeader("Accept") == "text/event-stream" {
@@ -88,13 +60,12 @@ func main() {
 func handleStandardRequest(c *gin.Context, appID, method string) {
 	body, _ := io.ReadAll(c.Request.Body)
 
-	// 从中间件获取解析出的 userId
-	// userId, _ := c.Get("userId")
-
 	// 构建元数据（gRPC Metadata），透传给 Java 端
-	// metadata := map[string]string{
-	// 	"x-user-id": fmt.Sprintf("%v", userId),
-	// }
+	md := metadata.Pairs(
+		"x-user-id", c.GetString("userId"),
+		"x-user-role", c.GetString("role"),
+	)
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
 
 	content := &dapr.DataContent{
 		Data:        body,
@@ -103,7 +74,7 @@ func handleStandardRequest(c *gin.Context, appID, method string) {
 
 	// 核心：动态调用 Dapr Service Invocation
 	resp, err := daprClient.InvokeMethodWithContent(
-		c.Request.Context(),
+		ctx,
 		appID,
 		method,
 		c.Request.Method,
@@ -153,18 +124,34 @@ func handleStreamRequest(c *gin.Context, appID, method string) {
 }
 
 // --- 中间件部分 ---
-
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := c.GetHeader("Authorization")
-		if token == "" {
-			// 这里仅作演示，实际应解析并校验 JWT
-			c.Set("userId", "guest_user")
+		appID := c.Param("appID")
+		method := c.Param("method")
+		requiredAuth := config.GetRequiredAuth(appID, method, c.Request.Method)
+		if requiredAuth == "Empty" {
 			c.Next()
 			return
 		}
-		// 模拟 JWT 解析出 userId = 123
-		c.Set("userId", "123")
+		token := c.GetHeader("Authorization")
+		// 验证解析token
+		claims, err := utils.ValidateJWT(token)
+		if err != nil {
+			log.Printf("JWT 解析失败: %v", err)
+			c.JSON(401, gin.H{"msg": "身份验证失败"})
+			c.Abort()
+			return
+		}
+		// 如果需要 Admin 权限，额外检查角色
+		if requiredAuth == "Admin" && claims.Role != "ADMIN" {
+			c.JSON(403, gin.H{"msg": "权限不足，需要管理员角色"})
+			c.Abort()
+			return
+		}
+		log.Printf("用户 %s 角色 %s 访问 %s/%s 成功", claims.UserId, claims.Role, appID, method)
+		c.Set("userId", claims.UserId)
+		c.Set("username", claims.Username)
+		c.Set("role", claims.Role)
 		c.Next()
 	}
 }

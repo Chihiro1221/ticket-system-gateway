@@ -1,0 +1,42 @@
+gateway:
+  # 默认策略：如果没配置，默认需要 Auth
+  default_auth: "Auth"
+  routes:
+    # 票务服务
+    - app_id: "ticket-service"
+      rules:
+        - path: "/api/ticket/list"
+          methods: ["GET"]
+          auth: "Empty"    # 所有人可看
+        - path: "/api/ticket/order"
+          methods: ["POST"]
+          auth: "Auth"     # 下单必须登录
+        - path: "/api/ticket/payment/**"
+          methods: ["POST"]
+          auth: "Auth"     # 支付相关必须登录
+        - path: "/api/users/register"
+          methods: ["POST"]
+          auth: "Empty"    
+        - path: "/api/users/login"
+          methods: ["POST"]
+          auth: "Empty"     
+        - path: "/api/users/*"
+          methods: ["PUT"]
+          auth: "User"    
+        - path: "/api/users"
+          methods: ["GET"]
+          auth: "User"    
+        - path: "/api/users/*"
+          methods: ["DELETE"]
+          auth: "User"    
+        - path: "/api/users/list"
+          methods: ["GET"]
+          auth: "Admin"    
+    
+    # 用户服务 (Example)
+    - app_id: "user-service"
+      rules:
+        - path: "/api/user/login"
+          auth: "Empty"
+        - path: "/api/user/register"
+          auth: "Empty"
