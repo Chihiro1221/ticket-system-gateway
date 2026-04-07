@@ -5,15 +5,27 @@ gateway:
     # 票务服务
     - app_id: "ticket-service"
       rules:
-        - path: "/api/ticket/list"
+        - path: "/api/ticket"
           methods: ["GET"]
           auth: "Empty"    # 所有人可看
-        - path: "/api/ticket/order"
+        - path: "/api/ticket"
+          methods: ["POST"]
+          auth: "Admin"
+        - path: "/api/ticket/*"
+          methods: ["GET"]
+          auth: "Empty"
+        - path: "/api/ticket/*"
+          methods: ["PUT", "DELETE"]
+          auth: "Admin"
+        - path: "/api/ticket-stock/order"
           methods: ["POST"]
           auth: "Auth"     # 下单必须登录
-        - path: "/api/ticket/payment/**"
+        - path: "/api/ticket-stock/payment/**"
           methods: ["POST"]
           auth: "Auth"     # 支付相关必须登录
+        - path: "/api/ticket-stock/stock/*"
+          methods: ["GET"]
+          auth: "Empty"
         - path: "/api/users/register"
           methods: ["POST"]
           auth: "Empty"    
@@ -31,7 +43,16 @@ gateway:
           auth: "User"    
         - path: "/api/users/list"
           methods: ["GET"]
-          auth: "Admin"    
+          auth: "Admin"
+        - path: "/api/orders/current"
+          methods: ["GET"]
+          auth: "Auth"
+        - path: "/api/demo/seckill/run"
+          methods: ["POST"]
+          auth: "Admin"
+        - path: "/api/demo/seckill/stream"
+          methods: ["GET"]
+          auth: "Admin"
     
     # 用户服务 (Example)
     - app_id: "user-service"

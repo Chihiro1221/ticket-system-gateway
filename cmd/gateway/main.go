@@ -18,8 +18,8 @@ import (
 
 var (
 	daprClient dapr.Client
-	// 针对 AppID 的限流器，每秒 50 个请求，桶大小 100
-	limiter = rate.NewLimiter(50, 100)
+	// 演示环境调高入口吞吐：每秒 300 个请求，桶大小 600
+	limiter = rate.NewLimiter(300, 600)
 )
 
 func main() {
@@ -59,6 +59,9 @@ func main() {
 // --- 处理普通请求 (HTTP 转 gRPC) ---
 func handleStandardRequest(c *gin.Context, appID, method string) {
 	body, _ := io.ReadAll(c.Request.Body)
+	if rawQuery := c.Request.URL.RawQuery; rawQuery != "" {
+		method = method + "?" + rawQuery
+	}
 
 	// 构建元数据（gRPC Metadata），透传给 Java 端
 	md := metadata.Pairs(
@@ -94,6 +97,9 @@ func handleStreamRequest(c *gin.Context, appID, method string) {
 	// SSE 需要保持长连接，直接通过 Dapr 的 HTTP 接口进行代理，以支持流
 	// Dapr Sidecar 默认 HTTP 端口通常是 3500
 	daprUrl := fmt.Sprintf("http://localhost:3500/v1.0/invoke/%s/method/%s", appID, method)
+	if rawQuery := c.Request.URL.RawQuery; rawQuery != "" {
+		daprUrl = daprUrl + "?" + rawQuery
+	}
 
 	req, _ := http.NewRequest(c.Request.Method, daprUrl, c.Request.Body)
 	req.Header = c.Request.Header
@@ -143,7 +149,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 		// 如果需要 Admin 权限，额外检查角色
-		if requiredAuth == "Admin" && claims.Role != "ADMIN" {
+		if requiredAuth == "Admin" && !strings.EqualFold(claims.Role, "admin") {
 			c.JSON(403, gin.H{"msg": "权限不足，需要管理员角色"})
 			c.Abort()
 			return
